@@ -117,7 +117,7 @@ export class DetrembleurParser {
     let lineType = 'PRODUCT';
     if (rest.includes('*** GRATUIT ***')) lineType = 'GRATUIT';
     else if (/^VIDANGE/i.test(rest))      lineType = 'VIDANGE';
-    else if (/^RETOUR VID/i.test(rest))   lineType = 'RETOUR_VIDANGE';
+    else if (/^RET(?:OUR)?\s+VID/i.test(rest)) lineType = 'RETOUR_VIDANGE';
 
     // ── TVA en fin de ligne ──
     const tvaMatch = rest.match(/(6|21)\s*%\s*$/);
@@ -458,8 +458,16 @@ export class DetrembleurParser {
     check('HTVA 6%',  sum6,  summary.total_htva_6);
 
     // ── Contrôle vidanges ──
-    const vidLivrees  = lines.reduce((a, l) => a + (l.vid_total > 0  ? (l.vid_total ?? 0) : 0), 0);
-    const vidReprises = lines.reduce((a, l) => a + (l.vid_total < 0  ? (l.vid_total ?? 0) : 0), 0);
+    const isVidLine = l => l.line_type === 'VIDANGE' || l.line_type === 'RETOUR_VIDANGE';
+    const vidLivrees = lines.reduce((a, l) => {
+      if (l.vid_total === null) return a;
+      if (!isVidLine(l)) return a + l.vid_total;       // PRODUCT: net (positif et négatif)
+      return l.vid_total > 0 ? a + l.vid_total : a;    // VIDANGE/RETOUR_VIDANGE: positif seulement
+    }, 0);
+    const vidReprises = lines.reduce((a, l) => {
+      if (l.vid_total === null || l.vid_total >= 0) return a;
+      return isVidLine(l) ? a + l.vid_total : a;       // VIDANGE/RETOUR_VIDANGE: négatif seulement
+    }, 0);
     check('Vid.livrées',  vidLivrees,  summary.vidanges_livrees);
     check('Vid.reprises', vidReprises, summary.vidanges_reprises);
 

@@ -1,0 +1,466 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Benchmark Brasseurs — Ardenne Padel PNL</title>
+  <style>
+    :root {
+      --bg: #f6f8fb;
+      --card: #ffffff;
+      --line: #d8dee8;
+      --text: #1c2431;
+      --muted: #5d6b80;
+      --primary: #155eef;
+      --accent: #0f973d;
+      --best: #e7f8ef;
+      --best-border: #0f973d;
+      --worst: #fff0ed;
+      --worst-border: #c84b0e;
+      --warn: #fff4cc;
+      --warn-border: #b07c00;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: "Segoe UI", Tahoma, sans-serif; color: var(--text); background: linear-gradient(180deg,#edf2f9,#f8fafc); }
+    .wrap { max-width: 1400px; margin: 0 auto; padding: 16px; }
+
+    /* Top bar */
+    .topbar { display: flex; align-items: center; gap: 12px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; margin-bottom: 14px; }
+    .topbar a { color: var(--primary); text-decoration: none; font-size: 13px; white-space: nowrap; }
+    .topbar a:hover { text-decoration: underline; }
+    .topbar h1 { margin: 0; font-size: 17px; flex: 1; }
+    .topbar .meta { font-size: 12px; color: var(--muted); white-space: nowrap; }
+
+    /* Filters */
+    .filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+    .filter-btn { background: var(--card); border: 1px solid var(--line); border-radius: 20px; padding: 5px 14px; font: inherit; font-size: 13px; cursor: pointer; color: var(--text); }
+    .filter-btn.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+
+    /* Source cards */
+    .sources { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+    .src-card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; font-size: 12px; }
+    .src-card strong { display: block; margin-bottom: 2px; font-size: 13px; }
+    .src-card span { color: var(--muted); }
+    .src-det { border-left: 3px solid #5d6b80; }
+    .src-inbev { border-left: 3px solid #d4a017; }
+    .src-maziers { border-left: 3px solid #155eef; }
+    .src-kupper { border-left: 3px solid #0f973d; }
+
+    /* Legend */
+    .legend { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 12px; font-size: 12px; color: var(--muted); align-items: center; }
+    .leg { display: flex; align-items: center; gap: 5px; }
+    .leg-dot { width: 14px; height: 14px; border-radius: 3px; border: 1px solid; }
+
+    /* Category section */
+    .cat-section { margin-bottom: 18px; }
+    .cat-title { font-size: 14px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin: 0 0 6px 0; padding: 0; }
+
+    /* Table */
+    .tbl-wrap { background: var(--card); border: 1px solid var(--line); border-radius: 10px; overflow: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    thead th { background: #f5f8fc; border-bottom: 2px solid var(--line); padding: 9px 10px; text-align: left; position: sticky; top: 0; z-index: 1; white-space: nowrap; }
+    thead th.price-col { text-align: right; min-width: 100px; }
+    tbody tr:not(:last-child) td { border-bottom: 1px solid #edf1f7; }
+    tbody tr:hover td { background-color: #f8fafd !important; }
+    td { padding: 8px 10px; vertical-align: middle; }
+    td.price-col { text-align: right; font-variant-numeric: tabular-nums; }
+
+    /* Product name */
+    .prod-name { font-weight: 600; font-size: 13px; }
+    .prod-fmt { display: block; color: var(--muted); font-size: 11px; margin-top: 1px; }
+
+    /* Price cells */
+    td.best { background: var(--best); border-left: 3px solid var(--best-border); }
+    td.worst { background: var(--worst); border-left: 3px solid var(--worst-border); }
+    td.na { color: #b0bac8; font-size: 12px; }
+
+    /* Warning badge */
+    .warn-badge {
+      display: inline-block; margin-left: 5px; font-size: 10px; background: var(--warn);
+      border: 1px solid var(--warn-border); border-radius: 4px; padding: 0 4px;
+      cursor: help; vertical-align: middle; color: #7a5500;
+    }
+    /* Note badge */
+    .note-badge {
+      display: inline-block; margin-left: 5px; font-size: 10px; background: #eaf1ff;
+      border: 1px solid #aac0f0; border-radius: 4px; padding: 0 4px;
+      cursor: help; vertical-align: middle; color: #1348b8;
+    }
+    /* Price range */
+    .price-range { font-size: 10px; color: var(--muted); display: block; margin-top: 1px; }
+
+    /* Savings badge on Detrembleur vs cheapest */
+    .overprice { font-size: 10px; color: #c84b0e; display: block; margin-top: 1px; font-weight: 600; }
+
+    /* Footnote */
+    .footnotes { font-size: 12px; color: var(--muted); margin-top: 14px; border-top: 1px solid var(--line); padding-top: 10px; line-height: 1.8; }
+    .footnotes b { color: var(--text); }
+  </style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="topbar">
+    <a href="/">← Retour PNL</a>
+    <h1>Benchmark Brasseurs</h1>
+    <span class="meta">Prix HTVA par casier / fût — toutes accises comprises</span>
+  </div>
+
+  <!-- Source cards -->
+  <div class="sources">
+    <div class="src-card src-det">
+      <strong>Detrembleur SA</strong>
+      <span>Prix réels facturés (oct. 2025 → mai 2026)</span>
+    </div>
+    <div class="src-card src-inbev">
+      <strong>AB InBev (direct)</strong>
+      <span>OFFRE_INBEV.xlsx — tarif 2026, remise 20%</span>
+    </div>
+    <div class="src-card src-maziers">
+      <strong>Maziers / Drink Marché</strong>
+      <span>OFFRE_MAZIERS.pdf — 13.05.2026, tarif national</span>
+    </div>
+    <div class="src-card src-kupper">
+      <strong>GMBH Kupper</strong>
+      <span>OFFRE_KUPPER.pdf — devis 00020332 du 04.05.2026</span>
+    </div>
+  </div>
+
+  <!-- Filters -->
+  <div class="filters">
+    <button class="filter-btn active" onclick="setFilter('all', this)">Tout</button>
+    <button class="filter-btn" onclick="setFilter('futs', this)">Fûts (Kegs)</button>
+    <button class="filter-btn" onclick="setFilter('bieres', this)">Bières spéciales</button>
+    <button class="filter-btn" onclick="setFilter('soft', this)">Soft Drinks</button>
+  </div>
+
+  <!-- Legend -->
+  <div class="legend">
+    <span>Légende :</span>
+    <span class="leg"><span class="leg-dot" style="background:var(--best);border-color:var(--best-border)"></span> Prix le plus bas</span>
+    <span class="leg"><span class="leg-dot" style="background:var(--worst);border-color:var(--worst-border)"></span> Prix le plus élevé</span>
+    <span class="leg"><span class="warn-badge">⚠</span> Variation de prix chez Detrembleur</span>
+    <span class="leg"><span class="note-badge">★</span> Promotion (ex: 18+6 gratuits)</span>
+    <span class="leg" style="color:var(--muted)">— Non référencé</span>
+  </div>
+
+  <!-- Tables rendered by JS -->
+  <div id="tables"></div>
+
+  <div class="footnotes">
+    <b>Notes :</b><br>
+    <b>★ Leffe 18+6 GRATUITES</b> : Detrembleur livre 24 bouteilles (18 payées + 6 offertes). Le prix affiché est bien le prix total du casier de 24 bouteilles livré, donc comparable aux autres fournisseurs.<br>
+    <b>Fûts</b> : "IFK" = In-Line-Fitting Keg (valve S), standard pour pompes Horeca. Tous les fûts 20L/30L/50L sont compatibles.<br>
+    <b>KEG = FÛT</b> : même produit — terminologie InBev (anglais) vs Detrembleur/Maziers (français).<br>
+    <b>24/3 = 24×33cl, 24/4 = 24×25cl, 24/5 = 24×20cl</b> : nomenclature Maziers basée sur la fraction de litre.<br>
+    <b>Attention</b> : les prix Detrembleur sont les prix réels facturés (net HTVA après remise et accises). Les prix concurrents sont issus d'offres commerciales récentes et peuvent évoluer.
+  </div>
+
+</div>
+
+<script>
+const SUPPLIERS = ['det', 'inbev', 'maziers', 'kupper'];
+const SUPPLIER_LABELS = { det: 'Detrembleur', inbev: 'AB InBev', maziers: 'Maziers', kupper: 'Kupper' };
+const SUPPLIER_COLORS = { det: '#5d6b80', inbev: '#d4a017', maziers: '#155eef', kupper: '#0f973d' };
+
+const CATEGORIES = [
+  {
+    id: 'futs',
+    label: 'Fûts (Kegs)',
+    rows: [
+      {
+        desc: 'JUPILER FÛT 20L',
+        fmt: 'fût 20L · IFK',
+        det: { min: 67.10, max: 70.05, n: 2, purchases: 14 },
+        inbev: 53.52, maziers: 56.64, kupper: 58.04
+      },
+      {
+        desc: 'JUPILER FÛT 30L',
+        fmt: 'fût 30L',
+        det: { min: 101.76, max: 101.76, n: 1, purchases: 6 },
+        inbev: 77.81, maziers: null, kupper: null
+      },
+      {
+        desc: 'JUPILER FÛT 50L',
+        fmt: 'fût 50L',
+        det: { min: 163.70, max: 171.68, n: 2, purchases: 6 },
+        inbev: 125.28, maziers: 132.17, kupper: 135.73
+      },
+      {
+        desc: 'VIEILLE SALME 20L',
+        fmt: 'fût 20L',
+        det: { min: 78.49, max: 84.67, n: 3, purchases: 18 },
+        inbev: null, maziers: 90.82, kupper: 96.49
+      },
+    ]
+  },
+  {
+    id: 'bieres',
+    label: 'Bières spéciales (bouteilles)',
+    rows: [
+      {
+        desc: 'CHIMAY BLEU 9°',
+        fmt: '24×33cl',
+        det: { min: 43.63, max: 43.63, n: 1, purchases: 4 },
+        inbev: 39.18, maziers: null, kupper: 36.95
+      },
+      {
+        desc: 'CHOUFFE CHERRY',
+        fmt: '24×33cl',
+        det: { min: 37.61, max: 40.49, n: 3, purchases: 6 },
+        inbev: 34.46, maziers: 31.97, kupper: 33.75
+      },
+      {
+        desc: 'CHOUFFE MAC CHOUFFE',
+        fmt: '24×33cl',
+        det: { min: 35.47, max: 38.18, n: 2, purchases: 9 },
+        inbev: 33.25, maziers: null, kupper: null
+      },
+      {
+        desc: 'DESPERADOS',
+        fmt: '24×33cl',
+        det: { min: 43.34, max: 50.02, n: 2, purchases: 11 },
+        inbev: null, maziers: null, kupper: 36.65
+      },
+      {
+        desc: 'DUVEL 8.5°',
+        fmt: '24×33cl',
+        det: { min: 34.80, max: 37.46, n: 2, purchases: 6 },
+        inbev: 32.27, maziers: 29.79, kupper: 31.29
+      },
+      {
+        desc: 'HOEGAARDEN BLANCHE',
+        fmt: '24×25cl',
+        det: { min: 22.10, max: 24.67, n: 3, purchases: 8 },
+        inbev: 18.97, maziers: 19.22, kupper: 19.03
+      },
+      {
+        desc: 'HOEGAARDEN ROSÉE',
+        fmt: '24×25cl',
+        det: { min: 26.88, max: 26.88, n: 1, purchases: 1 },
+        inbev: 22.33, maziers: 23.05, kupper: 22.58
+      },
+      {
+        desc: 'LEFFE BLONDE ★',
+        fmt: '24×33cl (18+6 gratuits)',
+        det: { min: 24.36, max: 24.36, n: 1, purchases: 1, note: '★ 18 payés + 6 offerts = 24 livrés' },
+        inbev: 27.49, maziers: null, kupper: null
+      },
+      {
+        desc: 'LEFFE BRUNE ★',
+        fmt: '24×33cl (18+6 gratuits)',
+        det: { min: 24.36, max: 24.36, n: 1, purchases: 1, note: '★ 18 payés + 6 offerts = 24 livrés' },
+        inbev: 27.49, maziers: null, kupper: 28.09
+      },
+      {
+        desc: 'LIENNE GRANDGOUSIER 5°',
+        fmt: '24×33cl',
+        det: { min: 44.59, max: 46.22, n: 3, purchases: 13 },
+        inbev: null, maziers: null, kupper: 34.93
+      },
+      {
+        desc: 'LUPULUS BLONDE 8.5°',
+        fmt: '24×33cl',
+        det: { min: 32.71, max: 36.36, n: 2, purchases: 5 },
+        inbev: null, maziers: 27.34, kupper: 28.61
+      },
+      {
+        desc: 'LUPULUS BRUNE 8.5°',
+        fmt: '24×33cl',
+        det: { min: 38.47, max: 41.04, n: 2, purchases: 2 },
+        inbev: null, maziers: 28.95, kupper: 30.25
+      },
+      {
+        desc: 'ORVAL 6.2°',
+        fmt: '24×33cl',
+        det: { min: 41.42, max: 41.42, n: 1, purchases: 7 },
+        inbev: 35.34, maziers: null, kupper: 31.64
+      },
+      {
+        desc: 'PECHERESSE 2.5°',
+        fmt: '24×25cl',
+        det: { min: 30.53, max: 32.81, n: 2, purchases: 2 },
+        inbev: null, maziers: null, kupper: 28.23
+      },
+      {
+        desc: 'ST HUBERTUS BLONDE/AMBRÉE',
+        fmt: '12×33cl',
+        det: { min: 21.55, max: 21.96, n: 2, purchases: 9 },
+        inbev: null, maziers: 16.67, kupper: 17.79
+      },
+      {
+        desc: 'VIEILLE SALME 8.3°',
+        fmt: '24×33cl',
+        det: { min: 38.66, max: 38.66, n: 1, purchases: 1 },
+        inbev: null, maziers: 42.03, kupper: 44.84
+      },
+    ]
+  },
+  {
+    id: 'soft',
+    label: 'Soft Drinks',
+    rows: [
+      {
+        desc: 'COCA COLA',
+        fmt: '24×20cl',
+        det: { min: 16.58, max: 17.83, n: 3, purchases: 8 },
+        inbev: null, maziers: null, kupper: null
+      },
+      {
+        desc: 'COCA COLA ZERO',
+        fmt: '24×20cl',
+        det: { min: 16.30, max: 17.11, n: 3, purchases: 6 },
+        inbev: null, maziers: null, kupper: null
+      },
+      {
+        desc: 'FANTA ORANGE / LEMON',
+        fmt: '24×20cl',
+        det: { min: 16.78, max: 16.78, n: 1, purchases: 3 },
+        inbev: null, maziers: 15.01, kupper: null
+      },
+      {
+        desc: 'ICE TEA REGULAR+ZERO',
+        fmt: '24×25cl',
+        det: { min: 17.35, max: 17.74, n: 2, purchases: 4 },
+        inbev: null, maziers: null, kupper: null
+      },
+      {
+        desc: 'LOOZA (jus de fruits)',
+        fmt: '24×20cl',
+        det: { min: 18.65, max: 19.03, n: 2, purchases: 5 },
+        inbev: null, maziers: 16.35, kupper: null
+      },
+      {
+        desc: 'SCHWEPPES AGRUME & LIGHT',
+        fmt: '24×25cl',
+        det: { min: 24.89, max: 24.89, n: 1, purchases: 1 },
+        inbev: 20.23, maziers: null, kupper: null
+      },
+      {
+        desc: 'SCHWEPPES MOJITO / PINK / SPRITZ',
+        fmt: '24×25cl',
+        det: { min: 25.46, max: 25.46, n: 1, purchases: 1 },
+        inbev: 22.04, maziers: null, kupper: null
+      },
+      {
+        desc: 'SCHWEPPES TONIC',
+        fmt: '24×25cl',
+        det: { min: 25.37, max: 25.37, n: 1, purchases: 1 },
+        inbev: 21.17, maziers: null, kupper: null
+      },
+      {
+        desc: 'SPA GAZ / INTENSE',
+        fmt: '28×25cl',
+        det: { min: 12.68, max: 12.68, n: 1, purchases: 1 },
+        inbev: 10.58, maziers: 10.14, kupper: null
+      },
+    ]
+  }
+];
+
+// ── Rendering ─────────────────────────────────────────────────────────────────
+
+let currentFilter = 'all';
+
+function fmt2(n) { return n == null ? null : n.toFixed(2); }
+
+function renderTable(cat) {
+  const rows = cat.rows.map(row => {
+    // Collect all reference prices (det.min for comparison, others as-is)
+    const prices = {
+      det: row.det ? row.det.min : null,
+      inbev: row.inbev,
+      maziers: row.maziers,
+      kupper: row.kupper,
+    };
+    const vals = SUPPLIERS.map(s => prices[s]).filter(v => v != null);
+    const minVal = vals.length ? Math.min(...vals) : null;
+    const maxVal = vals.length ? Math.max(...vals) : null;
+
+    // Detrembleur cell
+    const det = row.det;
+    const hasVariation = det && det.n > 1 && (det.max - det.min) / det.min > 0.01;
+    const hasNote = det && det.note;
+
+    // Savings vs cheapest alternative (excluding Det)
+    const altPrices = ['inbev', 'maziers', 'kupper'].map(s => prices[s]).filter(v => v != null);
+    const cheapestAlt = altPrices.length ? Math.min(...altPrices) : null;
+    const overprice = (det && cheapestAlt && det.min > cheapestAlt + 0.05)
+      ? `+${(det.min - cheapestAlt).toFixed(2)} € vs moins cher`
+      : null;
+
+    function cell(sup) {
+      const price = prices[sup];
+      if (price == null) return `<td class="price-col na">—</td>`;
+      const isBest = price === minVal && vals.length > 1;
+      const isWorst = price === maxVal && vals.length > 1 && minVal !== maxVal;
+      const cls = isBest ? 'best' : isWorst ? 'worst' : '';
+
+      if (sup === 'det') {
+        const warnBadge = hasVariation
+          ? `<span class="warn-badge" title="Vendu à ${det.n} prix différents sur ${det.purchases} achats&#10;Min : ${det.min.toFixed(2)} €  /  Max : ${det.max.toFixed(2)} €">⚠</span>`
+          : '';
+        const noteBadge = hasNote
+          ? `<span class="note-badge" title="${det.note}">★</span>`
+          : '';
+        const range = hasVariation
+          ? `<span class="price-range">${det.min.toFixed(2)} – ${det.max.toFixed(2)} €</span>`
+          : '';
+        const overBadge = overprice
+          ? `<span class="overprice">▲ ${overprice}</span>`
+          : '';
+        return `<td class="price-col ${cls}">
+          <strong>${det.min.toFixed(2)} €</strong>${warnBadge}${noteBadge}
+          ${range}${overBadge}
+        </td>`;
+      }
+
+      const colDot = `<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${SUPPLIER_COLORS[sup]};margin-right:4px;vertical-align:middle;"></span>`;
+      return `<td class="price-col ${cls}">
+        ${price.toFixed(2)} €
+      </td>`;
+    }
+
+    return `<tr>
+      <td>
+        <span class="prod-name">${row.desc}</span>
+        <span class="prod-fmt">${row.fmt}</span>
+      </td>
+      ${SUPPLIERS.map(s => cell(s)).join('')}
+    </tr>`;
+  }).join('');
+
+  return `
+    <div class="cat-section" data-cat="${cat.id}" id="cat-${cat.id}">
+      <p class="cat-title">${cat.label}</p>
+      <div class="tbl-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th style="min-width:220px">Produit</th>
+              <th class="price-col" style="border-left:3px solid ${SUPPLIER_COLORS.det}">Detrembleur</th>
+              <th class="price-col" style="border-left:3px solid ${SUPPLIER_COLORS.inbev}">AB InBev</th>
+              <th class="price-col" style="border-left:3px solid ${SUPPLIER_COLORS.maziers}">Maziers</th>
+              <th class="price-col" style="border-left:3px solid ${SUPPLIER_COLORS.kupper}">Kupper</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+function setFilter(cat, btn) {
+  currentFilter = cat;
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.querySelectorAll('.cat-section').forEach(el => {
+    el.style.display = (cat === 'all' || el.dataset.cat === cat) ? '' : 'none';
+  });
+}
+
+// Initial render
+document.getElementById('tables').innerHTML = CATEGORIES.map(renderTable).join('');
+</script>
+</body>
+</html>

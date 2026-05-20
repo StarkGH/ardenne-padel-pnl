@@ -2,8 +2,10 @@ import http from 'http';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { spawn } from 'child_process';
 import dotenv from 'dotenv';
-import { migrate, pool } from '../../db.js';
+import { migrate, pool, upsertNrRegister } from '../../db.js';
+import { NextoreRegisterParser } from '../adapters/nextore-registers/parser.js';
 import {
   withClient,
   listSuppliers,
@@ -12,6 +14,7 @@ import {
   listNextoreCategories,
   listNextoreProducts,
   listSupplierProducts,
+  listSupplierToNextoreMappingsOverview,
   listMappingsForNextoreProduct,
   listSupplierCommandesWithReference,
   listSupplierArticlesSummaryWithReference,
@@ -27,6 +30,7 @@ import {
   saveInventoryControlCounts,
   getInventoryFinancialDocument,
   listBarRentabilityDaily,
+  listRegisterDetails,
   upsertSupplierReferencePrice,
   createProductMapping,
   createProductMappingsBulk,
@@ -36,9 +40,30 @@ import {
 dotenv.config();
 
 const PORT = Number(process.env.MAPPINGS_UI_PORT || 8090);
+const HOST = String(process.env.MAPPINGS_UI_HOST || '127.0.0.1');
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const HTML_PATH = path.join(__dirname, 'product-mappings-ui.html');
+const REGISTERS_DIR = process.env.REGISTERS_DIR || '/home/stark2026/projects/nextore-registers/registers';
+const NEXTORE_REGISTERS_DIR = process.env.NEXTORE_REGISTERS_PROJECT_DIR || '/home/stark2026/projects/nextore-registers';
+
+let importRegistersRunning = false;
+
+function runScript(script, args = [], cwd = NEXTORE_REGISTERS_DIR) {
+  return new Promise((resolve, reject) => {
+    const proc = spawn('node', [script, ...args], { cwd, env: process.env });
+    proc.stdout.on('data', d => process.stdout.write(d));
+    proc.stderr.on('data', d => process.stderr.write(d));
+    proc.on('close', code => {
+      if (code === 0) resolve();
+      else reject(new Error(`${script} exited with code ${code}`));
+    });
+  });
+}
+
+function runFetchRegisters(args = []) {
+  return runScript('fetch-registers-html.js', args, NEXTORE_REGISTERS_DIR);
+}
 
 function sendJson(res, status, data) {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -124,6 +149,15 @@ async function handleApi(req, res, urlObj) {
   if (req.method === 'GET' && pathname === '/api/supplier-products') {
     const supplierCodes = parseSupplierCodes(searchParams.get('supplier'), ['DETREMBLEUR']);
     return sendJson(res, 200, await withClient(c => listSupplierProducts(c, supplierCodes, searchParams.get('q') || '')));
+  }
+
+  if (req.method === 'GET' && pathname === '/api/supplier-nextore-mappings-overview') {
+    const supplierCodes = parseSupplierCodes(searchParams.get('supplier'), ['DETREMBLEUR']);
+    return sendJson(
+      res,
+      200,
+      await withClient(c => listSupplierToNextoreMappingsOverview(c, supplierCodes, searchParams.get('q') || ''))
+    );
   }
 
   if (req.method === 'GET' && pathname === '/api/mappings') {
@@ -229,6 +263,10 @@ async function handleApi(req, res, urlObj) {
     return sendJson(res, 200, await withClient(c => listBarRentabilityDaily(c)));
   }
 
+  if (req.method === 'GET' && pathname === '/api/register-details') {
+    return sendJson(res, 200, await withClient(c => listRegisterDetails(c)));
+  }
+
   if (req.method === 'GET' && pathname === '/api/invoice-file') {
     const invoiceId = Number(searchParams.get('id'));
     if (!Number.isInteger(invoiceId)) return sendJson(res, 400, { error: 'id invalide' });
@@ -283,6 +321,93 @@ async function handleApi(req, res, urlObj) {
     return sendJson(res, 200, { deleted: await withClient(c => deleteProductMapping(c, id)) });
   }
 
+  if (req.method === 'POST' && pathname === '/api/sync-payment-lines') {
+    try {
+      const { rows: [r] } = await pool.query(
+        `SELECT to_char(MAX(payment_at) - interval '1 day', 'YYYY-MM-DD') AS from_date FROM nr_payment_lines`
+      );
+      const fromDate = r?.from_date || '2025-10-01';
+      console.log(`💳 Fetch payment lines depuis ${fromDate}…`);
+      await runScript('fetch-payment-lines.js', [`--from=${fromDate}`], NEXTORE_REGISTERS_DIR);
+      await runScript('src/adapters/nextore-registers/import-payment-lines.js', [], path.join(__dirname, '../..'));
+      const { rows } = await pool.query('SELECT COUNT(*) AS n FROM nr_payment_lines');
+      return sendJson(res, 200, { ok: true, from: fromDate, total: Number(rows[0].n) });
+    } catch (err) {
+      return sendJson(res, 500, { error: err.message });
+    }
+  }
+
+  if (req.method === 'POST' && pathname === '/api/sync-ticket-lines') {
+    try {
+      const { rows: [r] } = await pool.query(
+        `SELECT to_char(MAX(sale_date) - interval '1 day', 'YYYY-MM-DD') AS from_date FROM nr_ticket_lines`
+      );
+      const fromDate = r?.from_date || '2025-10-01';
+      console.log(`🎫 Fetch ticket lines depuis ${fromDate}…`);
+      await runScript('fetch-ticket-lines.js', [`--from=${fromDate}`], NEXTORE_REGISTERS_DIR);
+      await runScript('src/adapters/nextore-registers/import-ticket-lines.js', [], path.join(__dirname, '../..'));
+      const { rows } = await pool.query('SELECT COUNT(*) AS n FROM nr_ticket_lines');
+      return sendJson(res, 200, { ok: true, from: fromDate, total: Number(rows[0].n) });
+    } catch (err) {
+      return sendJson(res, 500, { error: err.message });
+    }
+  }
+
+  if (req.method === 'POST' && pathname === '/api/sync-products') {
+    try {
+      console.log('🛍️  Fetch produits Nextore…');
+      await runScript('fetch-products.js', [], NEXTORE_REGISTERS_DIR);
+      await runScript('src/adapters/nextore-registers/import-products.js', [], path.join(__dirname, '../..'));
+      const { rows } = await pool.query('SELECT COUNT(*) AS n FROM nr_products');
+      return sendJson(res, 200, { ok: true, total: Number(rows[0].n) });
+    } catch (err) {
+      return sendJson(res, 500, { error: err.message });
+    }
+  }
+
+  if (req.method === 'POST' && pathname === '/api/import-registers') {
+    if (importRegistersRunning) {
+      return sendJson(res, 409, { error: 'Import déjà en cours' });
+    }
+    importRegistersRunning = true;
+    try {
+      const { rows: [r] } = await pool.query('SELECT MAX(id) AS max_id FROM nr_registers');
+      const maxId = Number(r?.max_id || 0);
+      console.log(`📡 Téléchargement des registres depuis Nextore (après R${maxId})…`);
+      await runFetchRegisters([`--from-id=${maxId}`]);
+    } catch (fetchErr) {
+      importRegistersRunning = false;
+      return sendJson(res, 500, { error: `Échec téléchargement Nextore : ${fetchErr.message}` });
+    }
+    const files = fs.readdirSync(REGISTERS_DIR)
+      .filter(f => f.endsWith('.json'))
+      .sort((a, b) => {
+        const na = parseInt(a.match(/\d+/)?.[0] ?? '0', 10);
+        const nb = parseInt(b.match(/\d+/)?.[0] ?? '0', 10);
+        return na - nb;
+      })
+      .map(f => path.join(REGISTERS_DIR, f));
+    const parser = new NextoreRegisterParser();
+    let inserted = 0, skipped = 0, errors = 0;
+    for (const filePath of files) {
+      let parsed;
+      try { parsed = parser.parse(filePath); } catch { errors++; continue; }
+      const { register, payments, categories, sales } = parsed;
+      if (register.ticketsCount === 0 && register.totalTtc === 0) { skipped++; continue; }
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const { inserted: ok } = await upsertNrRegister(client, { register, payments, categories, sales });
+        await client.query('COMMIT');
+        if (ok) inserted++; else skipped++;
+      } catch { await client.query('ROLLBACK'); errors++; }
+      finally { client.release(); }
+    }
+    importRegistersRunning = false;
+    console.log(`📥 Registres: ${inserted} insérés, ${skipped} skippés, ${errors} erreurs`);
+    return sendJson(res, 200, { inserted, skipped, errors, total: files.length });
+  }
+
   return false;
 }
 
@@ -305,15 +430,35 @@ async function main() {
         return;
       }
 
+      if (req.method === 'GET' && urlObj.pathname === '/benchmark-brasseur') {
+        const benchHtml = fs.readFileSync(path.join(__dirname, 'benchmark-brasseur.html'), 'utf8');
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end(benchHtml);
+        return;
+      }
+
+      if (req.method === 'GET' && urlObj.pathname === '/healthz') {
+        return sendJson(res, 200, { ok: true, service: 'product-mappings-ui' });
+      }
+
       sendJson(res, 404, { error: 'Not found' });
     } catch (err) {
       sendJson(res, 500, { error: err.message });
     }
   });
 
-  server.listen(PORT, () => {
-    console.log(`✅ Product mappings UI: http://localhost:${PORT}`);
+  server.listen(PORT, HOST, () => {
+    console.log(`✅ Product mappings UI: http://${HOST}:${PORT}`);
   });
+
+  const shutdown = async () => {
+    server.close(async () => {
+      await pool.end().catch(() => {});
+      process.exit(0);
+    });
+  };
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
 }
 
 main().catch(async err => {
